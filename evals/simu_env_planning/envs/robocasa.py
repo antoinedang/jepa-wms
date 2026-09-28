@@ -5,7 +5,6 @@
 
 import logging
 import os
-import re
 import sys
 import time
 
@@ -14,13 +13,14 @@ import numpy as np
 import robosuite
 from robocasa.utils.dataset_registry import MULTI_STAGE_TASK_DATASETS, SINGLE_STAGE_TASK_DATASETS
 from robocasa.utils.env_utils import create_env
+from robocasa.utils.asset_path_utils import (
+    normalize_robocasa_asset_path,
+    rewrite_mjcf_asset_paths as path_change,
+)
 from scipy.spatial.transform import Rotation as R
 
 from evals.simu_env_planning.envs.wrappers.time_limit import TimeLimit
 
-BASE_ASSET_ROOT_PATH = os.path.join(
-    os.environ.get("JEPAWM_HOME", os.path.expanduser("~")), "robocasa/robocasa/models/assets/objects"
-)
 
 os.environ["MUJOCO_GL"] = "egl"
 os.environ["PYOPENGL_PLATFORM"] = "egl"
@@ -357,33 +357,8 @@ def update_mjcf_paths(object_cfgs):
     """
     for i, object_cfg in enumerate(object_cfgs):
         path = object_cfg["info"]["mjcf_path"]
-        models_index = path.find("objects")
-        relative_path = path[models_index:]  # e.g. 'models/assets/objects/aigen_objs/apple/apple_5/model.xml'
-        full_local_path = os.path.join(BASE_ASSET_ROOT_PATH, relative_path[len("objects/") :])
-        object_cfgs[i]["info"]["mjcf_path"] = full_local_path
+        object_cfgs[i]["info"]["mjcf_path"] = normalize_robocasa_asset_path(path)
     return object_cfgs
-
-
-def path_change(xml_string):
-    """
-    Fix absolute file paths in the MJCF XML by replacing them with local paths
-    rooted at BASE_ASSET_ROOT_PATH.
-    """
-
-    def replace_path(match):
-        original_path = match.group(1)
-        model_index = original_path.find("objects/")
-        if model_index == -1:
-            return f'file="{original_path}"'
-
-        relative_path = original_path[model_index + len("objects/") :]
-        new_path = os.path.join(BASE_ASSET_ROOT_PATH, relative_path)
-        new_path = os.path.normpath(new_path)
-
-        return f'file="{new_path}"'
-
-    updated_xml = re.sub(r'file="([^"]+)"', replace_path, xml_string)
-    return updated_xml
 
 
 def _prepare_xml(env, model_xml):
