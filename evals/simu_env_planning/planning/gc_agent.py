@@ -62,6 +62,7 @@ class GC_Agent:
                 action_masks=None,
                 local_generator=self.local_gpu_generator,
                 decode_unroll=self.model.decode_unroll,
+                tqdm_silent=self.cfg.logging.tqdm_silent or self.cfg.rank != 0,
                 **self.cfg.planner,
             )
         elif self.cfg.planner.planner_name == "mppi":

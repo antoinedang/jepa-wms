@@ -363,7 +363,7 @@ class PlanEvaluator:
             expert_success = 1
             self.state_g = goal_info["state"]
             expert_obses = []
-        elif cfg.task_specification.goal_source in ["dset", "random_action"]:
+        elif cfg.task_specification.goal_source in ["dset", "random_action", "imagine"]:
             # Sample a trajectory segment from the dataset, the goal and initial states are tensordicts
             # with a time dimension of num_frames and num_proprios, with adjacent (in time) frames and proprios
             # Because of env.reset_warmup() the num_frames initial frames and proprios are identical.

@@ -12,6 +12,7 @@ import nevergrad as ng
 import numpy as np
 import torch
 import torch.distributed as dist
+from tqdm.auto import tqdm
 
 from evals.simu_env_planning.planning.planning import objectives
 from src.utils.logging import get_logger
@@ -45,8 +46,16 @@ class Planner(ABC):
     def plan(self, obs: torch.Tensor, steps_left: int):
         pass
 
-    def cost_function(self, actions: torch.Tensor, z_init: torch.Tensor) -> torch.Tensor:
-        predicted_encs = self.unroll(z_init, actions)
+    def cost_function(
+        self,
+        actions: torch.Tensor,
+        z_init: torch.Tensor,
+        progress_callback: Callable = None,
+    ) -> torch.Tensor:
+        if progress_callback is None:
+            predicted_encs = self.unroll(z_init, actions)
+        else:
+            predicted_encs = self.unroll(z_init, actions, progress_callback=progress_callback)
         return self.objective(predicted_encs, actions)
 
 
@@ -227,6 +236,7 @@ class CEMPlanner(Planner):
         num_act_stepped: int = None,
         decode_each_iteration: bool = False,
         decode_unroll: Callable = None,
+        tqdm_silent: bool = False,
         **kwargs,
     ):
         super().__init__(unroll)
@@ -247,6 +257,7 @@ class CEMPlanner(Planner):
         self.num_act_stepped = num_act_stepped
         self.decode_each_iteration = decode_each_iteration
         self.decode_unroll = decode_unroll
+        self.tqdm_silent = tqdm_silent
 
     @torch.no_grad()
     def plan(
@@ -286,6 +297,13 @@ class CEMPlanner(Planner):
         if self.decode_each_iteration:
             pred_frames_over_iterations = []
         # Iterate CEM
+        pbar = tqdm(
+            desc="CEM model rollout",
+            total=self.iterations * plan_length,
+            position=1,
+            leave=False,
+            disable=self.tqdm_silent,
+        )
         for itr in range(self.iterations):
             actions[:, :] = mean.unsqueeze(1) + std.unsqueeze(1) * torch.randn(
                 plan_length, self.num_samples, self.action_dim, device=std.device, generator=self.local_generator
@@ -299,9 +317,24 @@ class CEMPlanner(Planner):
                     for i, (dims, maxnorm) in enumerate(zip(self.max_norm_dims, self.max_norms)):
                         # Clip the specified dimensions to [-maxnorm, maxnorm]
                         actions[h, :, dims] = torch.clip(actions[h, :, dims], min=-maxnorm, max=maxnorm)
-            # Compute elite actions
-            cost = self.cost_function(actions, z_init).unsqueeze(1)
+            progress_callback = None
+            if not self.tqdm_silent:
+                def progress_callback(rollout_step):
+                    if self.device.type == "cuda":
+                        torch.cuda.synchronize(self.device)
+                    pbar.update(1)
+                    pbar.set_postfix(
+                        iteration=f"{itr + 1}/{self.iterations}",
+                        rollout_step=f"{rollout_step}/{plan_length}",
+                    )
+
+                pbar.set_postfix(
+                    iteration=f"{itr + 1}/{self.iterations}",
+                    status="model rollout",
+                )
+            cost = self.cost_function(actions, z_init, progress_callback=progress_callback).unsqueeze(1)
             losses.append(cost.min().item())
+            pbar.set_postfix(iteration=f"{itr + 1}/{self.iterations}", best_loss=f"{losses[-1]:.3f}")
             # Gather all values
             if self.distribute_planner:
                 cost = torch.cat(FullGatherLayer.apply(cost), dim=0)
@@ -329,6 +362,7 @@ class CEMPlanner(Planner):
                 pred_frames_over_iterations.append(pred_frames)
                 # [T H W 3]: uint 8 in [0, 255]
 
+        pbar.close()
         self._prev_mean = mean
         a = mean[: self.num_act_stepped]
         if self.distribute_planner:

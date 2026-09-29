@@ -50,6 +50,10 @@ parser.add_argument("--checkpoint", type=str, help="location of pretrained ckpt"
 parser.add_argument("--model_name", type=str, help="Model name")
 parser.add_argument("--batch_size", type=int)
 parser.add_argument("--use_fsdp", action="store_true")
+parser.add_argument("--eval-episodes", type=int, help="Override the number of evaluation episodes")
+parser.add_argument("--render-onscreen", action="store_true", help="Open a live simulator viewer")
+parser.add_argument("--camera-name", type=str, default="robot0_leftview", help="Camera used by the live viewer")
+parser.add_argument("--quick-preview", action="store_true", help="Use a tiny planner budget for live visualization")
 
 
 def process_main(args, rank, fname, world_size, devices):
@@ -71,6 +75,16 @@ def process_main(args, rank, fname, world_size, devices):
     params = None
     with open(fname, "r") as y_file:
         params = yaml.load(y_file, Loader=yaml.FullLoader)
+        if args.eval_episodes is not None:
+            params.setdefault("meta", {})["eval_episodes"] = args.eval_episodes
+        if args.render_onscreen:
+            env_cfg = params.setdefault("task_specification", {}).setdefault("env", {})
+            env_cfg["render_onscreen"] = True
+            env_cfg["camera_name"] = args.camera_name
+        if args.quick_preview:
+            params.setdefault("meta", {})["quick_debug"] = True
+            params.setdefault("logging", {})["optional_plots"] = False
+            params.setdefault("planner", {})["decode_each_iteration"] = False
         if args.checkpoint:
             params["model_kwargs"]["checkpoint"] = args.checkpoint
         if args.model_name:

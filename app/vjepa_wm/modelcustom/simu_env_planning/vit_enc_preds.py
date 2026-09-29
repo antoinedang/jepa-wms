@@ -286,7 +286,7 @@ class EncPredWM(nn.Module):
         self.ctxt_window = ctxt_window
         self.proprio_mode = proprio_mode
 
-    def unroll(self, z_ctxt, act_suffix=None, debug=False):
+    def unroll(self, z_ctxt, act_suffix=None, debug=False, progress_callback=None):
         """Autoregressively predict latent features forward in time using actions.
 
         Starts from context features and iteratively predicts next timestep using
@@ -298,6 +298,7 @@ class EncPredWM(nn.Module):
                 If Tensor: visual features only [B, tau, V, H, W, D].
             act_suffix (Tensor): Action sequence [T, B, A] where A matches predictor's expected action dim.
             debug (bool): Enable debug mode in forward_pred.
+            progress_callback (callable, optional): Called after each predicted step.
 
         Returns:
             TensorDict or Tensor: Predicted latent features [T+tau, B, V, H, W, D].
@@ -344,6 +345,8 @@ class EncPredWM(nn.Module):
             vid_feats = torch.cat([vid_feats, next_vid_feat], dim=1)
             if prop_feats is not None:
                 prop_feats = torch.cat([prop_feats, next_prop_feat], dim=1)
+            if progress_callback is not None:
+                progress_callback(h + 1)
         if isinstance(z_ctxt, TensorDict):
             vid_feats = rearrange(vid_feats, "b t ... -> t b ...")
             prop_feats = rearrange(prop_feats, "b t ... -> t b ...")

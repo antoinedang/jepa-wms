@@ -151,7 +151,13 @@ def main_distributed_episodes_eval(cfg: dict, model=None, dset=None, preprocesso
     else:
         cfg.action_ratio = cfg.frameskip // model.action_skip
     log.info("First env creation just to define cfg.action_dim")
+    render_onscreen = cfg.task_specification.env.get("render_onscreen", False)
+    if render_onscreen:
+        cfg.task_specification.env.render_onscreen = False
     env = make_env(cfg)  # needed here to define cfg.action_dim
+    if render_onscreen:
+        cfg.task_specification.env.render_onscreen = True
+        env.env.live_view = True
 
     # We assume we have more episodes than GPUs
     cfg.planner.distribute_planner = False
@@ -193,8 +199,10 @@ def main_distributed_episodes_eval(cfg: dict, model=None, dset=None, preprocesso
     agent = GC_Agent(cfg, model, dset=dset, preprocessor=preprocessor)
     cfg.task_indices, cfg.episodes_per_task = compute_task_distribution(cfg)
     log.info(f"Rank {cfg.rank}: \n {cfg.task_indices=} \n {cfg.episodes_per_task=}")
-    # The multitask wrapper allows to iterate over the task-specific envs
-    env = make_env(cfg)
+    # Reuse the action-dimension probe env in live mode to avoid a second MuJoCo
+    # instance competing for EGL resources; otherwise recreate the evaluation env.
+    if not render_onscreen:
+        env = make_env(cfg)
     evaluator = PlanEvaluator(cfg, agent)
     results = dict()
     processed_episodes = set()

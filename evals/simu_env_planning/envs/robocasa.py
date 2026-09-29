@@ -47,6 +47,8 @@ class RoboCasaWrapper(gym.Wrapper):
         self.subtask = cfg.task_specification.env.get("subtask", None)
         self.goal_obj_pos = None
         self.env_name = env_name
+        self.live_view = cfg.task_specification.env.get("render_onscreen", False)
+        self._live_view_initialized = False
         self.camera_name = camera_name  # default camera name working with the underlying robosuite env
         self.custom_camera_name = self.camera_name
         self.camera_width = self.env.camera_widths[0]
@@ -215,6 +217,16 @@ class RoboCasaWrapper(gym.Wrapper):
             result = result[::-1]  # flip vertically
         else:
             result = result[:, ::-1]  # flip horizontally
+        if self.live_view:
+            import cv2
+
+            if not self._live_view_initialized:
+                logger.info("Displaying first EGL camera frame in OpenCV window")
+            cv2.imshow("RoboCasa VJEPA", cv2.cvtColor(result, cv2.COLOR_RGB2BGR))
+            cv2.waitKey(1)
+            if not self._live_view_initialized:
+                logger.info("First OpenCV camera frame displayed")
+            self._live_view_initialized = True
         return result
 
     def seed(self, seed=None):
@@ -302,6 +314,10 @@ class RoboCasaWrapper(gym.Wrapper):
         except Exception as e:
             logger.warning(f"Failed to set simulator state: {e}")
 
+        if self.cfg.task_specification.env.get("render_onscreen", False):
+            logger.info("Opening live RoboCasa camera window with camera %s", self.camera_name)
+            self.render()
+
         logger.info(f"robocasa env.prepare() took {time.time() - prep_start_time:.2f} seconds")
         return obs, info
 
@@ -325,19 +341,20 @@ def make_env(cfg):
 
     if not cfg.task_specification.task.startswith("robocasa-") or env_name not in all_tasks:
         raise ValueError("Unknown task:", cfg.task_specification.task)
+    camera_name = cfg.task_specification.env.get("camera_name", "robot0_leftview")
     # Dummy env that is later modified in RobocasaWrapper.prepare()
     # logger.info(f"Creating dummy RoboCasa PnPSinkToCounter..")
     env = create_env(
         env_name=env_name,  # e.g. "PnPSinkToCounter",
         robots=cfg.task_specification.env.get("robots", "PandaOmron"),
-        camera_names=["robot0_leftview"],
+        camera_names=[camera_name],
         camera_widths=cfg.task_specification.img_size,
         camera_heights=cfg.task_specification.img_size,
         seed=cfg.meta.seed,
         render_onscreen=False,
     )
     env = RoboCasaWrapper(
-        env, cfg, env_name, camera_name=cfg.task_specification.env.get("camera_name", "robot0_agentview_left")
+        env, cfg, env_name, camera_name=camera_name
     )
     logger.info("Wrapped RoboCasa environment with RoboCasaWrapper")
     env = TimeLimit(env, max_episode_steps=cfg.task_specification.max_episode_steps)
